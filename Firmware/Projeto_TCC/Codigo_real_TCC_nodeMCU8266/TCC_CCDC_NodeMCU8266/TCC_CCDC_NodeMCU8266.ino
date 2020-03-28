@@ -2,10 +2,29 @@
 // Bacharel: Engenharia de Computação.
 //Autor: Eduardo Ferrarezi.
 
-//NODEMCU 1 - Prova 1 (Arcos) + Prova 2 (Placas) + Prova 3 (Golf)
+//NODEMCU - Prova 1 (Arcos) + Prova 2 (Placas) + Prova 3 (Golf)
  
-//Carrega a biblioteca do sensor ultrassonico
+//Carrega as bibliotecas
 #include <Ultrasonic.h>
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+
+////////////////// CONFIG DO MQTT /////////////////////
+
+// Instância das classes para uso do protocolo MQTT
+WiFiClient espClient;
+PubSubClient client(espClient);
+const char* mqtt_server = "broker.hivemq.com";
+
+// Dados do WiFi
+const char* ssid = "Net Virtua 577";
+const char* password = "1000160930";
+
+char* topicPubArco1 = "tcc/drone/arco1";
+char* topicPubArco2 = "tcc/drone/arco2";
+char* topicPubPlaca = "tcc/drone/placa";
+char* topicPubGolf = "tcc/drone/golf";
+char* topicPubCronometro = "tcc/drone/cronometro";
  
 //Define os pinos para o trigger e echo do ultrassônico
 #define arco_trigger_1 D0
@@ -42,17 +61,35 @@ int validaPartida = 0, ePartida = 0, ePlataforma = 0, alteraDrone = 0;
 //Anula entrar na função
 int p = 0, g = 0;
 
+//Variaveis do cronômetro
+float firstTime, secondTime, finalTime;
+int validaFirstTime = 0, validaSecondTime = 0;
+char msg[20];
+
+void setup_wifi();
+void reconnect();
+void publica ();
+
 void prova_1_arcos();
 void prova_2_placas();
 void prova_3_gof();
+void timeOne();
 
 void setup() {
   pinMode(bPlataforma, INPUT);
   pinMode(pin_sensorLDR_1, INPUT);
   Serial.begin(9600);
+
+//Conecta no wifi e broker  
+  setup_wifi();
+  client.setServer(mqtt_server, 1883);
+  //client.setCallback(callback);
 }
  
 void loop() {
+
+  if (!client.connected()){ reconnect();}
+  
   button = digitalRead(bPlataforma);
 
   if ((button == false) && (validaPartida == 0) && (ePlataforma == 0)) {
@@ -72,6 +109,7 @@ void loop() {
   }
 
   if ((button == false) && (ePartida == 1)) {
+    if(!validaFirstTime){timeOne();}
     prova_1_arcos();
     if(!p){prova_2_placas();}
     if(!g){prova_3_gof();}
@@ -79,6 +117,10 @@ void loop() {
   }
 
   if ((button == true) && (validaPartida > 0)) {
+    secondTime = millis();
+    finalTime = secondTime - firstTime;
+    Serial.println(finalTime);
+    publica ();
     Serial.println("FIM");
     valida_arco_1 = 0;
     valida_arco_2 = 0;
@@ -89,7 +131,8 @@ void loop() {
     ePlataforma = 0;
     alteraDrone = 0;
     p = 0;
-    g = 0;  
+    g = 0;
+    validaFirstTime = 0;   
   }
 }
 
@@ -149,4 +192,56 @@ void prova_3_gof() {
     }
   }
   delay(10);
+}
+
+void timeOne() {
+  firstTime = millis();
+  validaFirstTime = 1;
+}
+
+/////////////////////////////////// FUNÇÕES DO MQTT ////////////////////////////////////////
+
+// função que realiza a conexão wifi
+void setup_wifi() {
+  delay(10);
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+// Função para restabelecer a conexão
+void reconnect() {
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+
+    if (client.connect("ESP8266ClientUnoesc")) {
+      Serial.println("connected");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
+}
+
+void publica () {
+  if(valida_arco_1 == 1){ client.publish(topicPubArco1, "OK"); } else{ client.publish(topicPubArco1, "-"); }
+  if(valida_arco_2 == 1){ client.publish(topicPubArco2, "OK"); } else{ client.publish(topicPubArco2, "-"); }
+  if(valida_placa_X == 1){ client.publish(topicPubPlaca, "OK"); } else{ client.publish(topicPubPlaca, "-"); }
+  if(valida_golf == 1){ client.publish(topicPubGolf, "OK"); } else{ client.publish(topicPubGolf, "-"); }
+  snprintf (msg, 20, "%f", finalTime);
+  if(finalTime > 1){ client.publish(topicPubCronometro, msg); } else{ client.publish(topicPubCronometro, "Erro"); }
 }
